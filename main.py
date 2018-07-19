@@ -2,10 +2,10 @@ import tensorflow as tf
 from MNIST_model import NN_MNIST
 import data
 from experiment import experiment
-
+import os
 
 tf.reset_default_graph()
-
+os.environ['TF_CPP_MIN_LOG_LEVEL']='1'
 # number of tasks 
 num_tasks = 3
 # Parameters
@@ -30,13 +30,13 @@ fisher_size = 200
 # experiment 2: CNN on split MNIST
 
 # experiment 3: RNN on permuted MNIST
-learning_rate = 0.1
+learning_rate = 0.2
 fisher_multiplier = 20
 sampler = 4
 input_size = 49
 output_size = 10
-hidden_units = 32
-fully_connected_units = 32
+hidden_units = 16
+fully_connected_units = 16
 time_step = 7
 features_per_step = 7
 data = data.generate_permuted_MNIST(num_tasks,sampler)

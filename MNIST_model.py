@@ -151,7 +151,8 @@ class NN_MNIST(object):
                     self.f_diag_cache[v] += tf.square(grads_per_sample[v])
                     self.f_block_cache[v] += tf.matmul(tf.reshape(grads_per_sample[v], (-1,1)), tf.reshape(grads_per_sample[v], (1,-1)))
                     f_cache_tmp.append(tf.reshape(grads_per_sample[v],(-1,1)))
-                self.f_cache += tf.concat(f_cache_tmp,0)
+                vec = tf.concat(f_cache_tmp,0)
+                self.f_cache += tf.matmul(vec,vec,transpose_b=True)
             else:
                 self.f_diag_cache = []
                 self.f_block_cache = []
@@ -160,85 +161,108 @@ class NN_MNIST(object):
                     self.f_diag_cache.append(tf.square(grads_per_sample[v]))
                     self.f_block_cache.append(tf.matmul(tf.reshape(grads_per_sample[v], (-1,1)), tf.reshape(grads_per_sample[v], (1,-1))))
                     f_cache_tmp.append(tf.reshape(grads_per_sample[v],(-1,1)))
-                self.f_cache = tf.concat(f_cache_tmp,0)
+                vec = tf.concat(f_cache_tmp,0)
+                self.f_cache = tf.matmul(vec,vec,transpose_b=True)
 
         # divide by fisher size
         for v in range(len(self.vars)):
             self.f_diag_cache[v] /= fisher_size
             self.f_block_cache[v] /= fisher_size
-                
-        self.f_diag = []
-        self.f_block = []
-        
         self.f_cache /= fisher_size
-        self.f = []
+        
+        self.f_diag = None
+        self.f_block = None
+        self.f = None
         return
 
     def compute_fisher(self,sess,fisher_x,fisher_y,fisher_diagonal=True,fisher_block=False,fisher_true=False):
-        tmp,tmp2 = [],[]
-    def compute_fisher(self,sess,fisher_x,fisher_y,fisher_diagonal=True,fisher_block=False,fisher_true=False):
-        tmp,tmp2 = [],[]
+        tmp,tmp2,tmp3 = [],[],[]
+                
         if fisher_diagonal:
             for v in range(len(self.vars)):
                 tmp.append(tf.Variable(self.f_diag_cache[v],trainable=False))
         if fisher_block:
             for v in range(len(self.vars)):
                 tmp2.append(tf.Variable(self.f_block_cache[v],trainable=False))	
+        if fisher_true:
+            tmp3.append(tf.Variable(self.f_cache,trainable=False))	
+            #sess.run(tf.variables_initializer([tmp3]),feed_dict={self.x:fisher_x,self.y_:fisher_y})
+
+        tmp_list = tmp+tmp2+tmp3
+        #sess.run((tf.variables_initializer(tmp),tf.variables_initializer(tmp2)),feed_dict={self.x:fisher_x,self.y_:fisher_y})  
         
-        if fisher_block:
-            tmp3 = tf.Variable(self.f_cache,trainable=False)	
-            sess.run(tf.variables_initializer(tmp3),feed_dict={self.x:fisher_x,slef.y_:fisher_y})
+        # initialize these values fisher data
+        sess.run(tf.variables_initializer(tmp_list),feed_dict={self.x:fisher_x,self.y_:fisher_y})  
 
-            if len(self.f)>0:
-                self.f += tmp3
-            else:
-                slef.f = tmp3
-
-        sess.run((tf.variables_initializer(tmp),tf.variables_initializer(tmp2)),feed_dict={self.x:fisher_x,self.y_:fisher_y})  
-
-        if len(self.f_diag)>0:
+        # add fisher of current task to previous fisher
+        if self.f_diag is not None:
             for v in range(len(tmp)):
                 self.f_diag[v]+=tmp[v]
         else:
             for v in range(len(tmp)):
                 self.f_diag.append(tmp[v])
 
-        if len(self.f_block)>0:
+        if self.f_block is not None:
             for v in range(len(tmp2)):
                 self.f_block[v] += tmp2[v]  
+        else:
             for v in range(len(tmp2)):
                 self.f_block.append(tmp2[v])
+
+        if self.f is not None:
+            if len(tmp3)>0:
+                self.f += tmp3[0]
+        else:
+            if len(tmp3)>0:
+                self.f = tmp3[0]
+
         return
 
     # calculate EWC loss: entropy and EWC penalty
-    def update_ewc_loss(self):
+    def update_ewc_loss(self,loss_option=0):
+        # loss_option:
+        # 0: without EWC penalty 1: with diagonal penalty 2: with block penalty 3: with full penalty
         self.penalty = tf.reduce_sum(tf.zeros([1],tf.float32))
-        # self.penalty2 = tf.reduce_sum(tf.zeros([1],tf.float32))
+        #self.penalty2 = tf.reduce_sum(tf.zeros([1],tf.float32))
+        # self.penalty3 = tf.reduce_sum(tf.zeros([1],tf.float32))
         if self.star_vars:
             tmp_vars =  [] 
             for v in range(len(self.vars)):
-                self.penalty += tf.reduce_sum(tf.multiply(self.f_diag[v],tf.square(tf.subtract(self.vars[v],self.star_vars[v]))))
-               # difference = tf.reshape(tf.subtract(self.vars[v],self.star_vars[v]),(-1,1))
-                #self.penalty2 += tf.reduce_sum(tf.matmul(tf.transpose(difference),tf.matmul(self.f_block[v],difference)))
-               # tmp_vars.append(tf.reshape(self.vars[v],(-1,1)))
-           # vars_vec = tf.concat(tmp_vars,0)
-           # differnece2 = self.star_vars_vec - vars_vec
-           # self.penalty3 = tf.reduce_sum(tf.matmul(difference2.transpose(),tf.matmul(self.f,difference2)))
+                if loss_option==1:
+                    self.penalty += tf.reduce_sum(tf.multiply(self.f_diag[v],tf.square(tf.subtract(self.vars[v],self.star_vars[v]))))
+                if loss_option==2:
+                    difference = tf.reshape(tf.subtract(self.vars[v],self.star_vars[v]),(-1,1))
+                    self.penalty2 += tf.reduce_sum(tf.matmul(tf.transpose(difference),tf.matmul(self.f_block[v],difference)))
+                if loss_option==3:
+                    tmp_vars.append(tf.reshape(self.vars[v],(-1,1)))
+            if loss_option==3:
+                vars_vec = tf.concat(tmp_vars,0)
+                difference2 = tf.reshape(self.star_vars_vec - vars_vec,(-1,1))
+                self.penalty = tf.reduce_sum(tf.matmul(tf.transpose(difference2),tf.matmul(self.f,difference2)))
+
         # total loss
         self.ewc_loss = self.cross_entropy +  (self.fisher_multiplier / 2) * self.penalty
         # train the model
         optimizer = tf.train.GradientDescentOptimizer(self.learning_rate)
-        gvs = optimizer.compute_gradients(self.ewc_loss)
+        self.gvs = optimizer.compute_gradients(self.ewc_loss)
         # clip the gradients in [-1,1]
-        capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gvs]
+        capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in self.gvs]
         self.train_step = optimizer.apply_gradients(capped_gvs)
         return
 
     def train(self,sess,batch_x,batch_y):
         sess.run(self.train_step,feed_dict={self.x:batch_x,self.y_:batch_y})        
-        print(sess.run((self.ewc_loss,self.cross_entropy),feed_dict={self.x:batch_x,self.y_:batch_y}))
+        #print(sess.run((self.ewc_loss,self.cross_entropy),feed_dict={self.x:batch_x,self.y_:batch_y}))
         return 
 
     def test(self,sess,test_x,test_y):
         return sess.run(self.accuracy,feed_dict={self.x:test_x,self.y_:test_y})
 
+    def get_bias(self):
+        return (self.b1.eval(),self.b2.eval())
+        
+    def get_grads(self,sess,batch_x,batch_y):
+        return sess.run(tf.reshape(self.gvs[3][0],[-1]),feed_dict={self.x:batch_x,self.y_:batch_y})
+
+    def get_fisher(self):
+        return self.f.eval()
