@@ -68,17 +68,21 @@ class NN_MNIST(object):
             self.b2 = tf.Variable(self.initializer([self.output_size]))
             logits = self.feed_forward(self.x)
 
+            self.num_paras = [self.input_size*self.fully_connected_units+self.fully_connected_units,self.fully_connected_units*self.output_size+self.output_size]
+
         else:
 			# create LSTM/GRU with n_hidden units.
-            self.rnn_cell = tf.contrib.rnn.BasicLSTMCell(self.hidden_units)
 
             self.w1 = tf.Variable(self.initializer([self.hidden_units,self.fully_connected_units]))
             self.b1 = tf.Variable(self.initializer([self.fully_connected_units]))
             self.w2 = tf.Variable(self.initializer([self.fully_connected_units,self.output_size]))
             self.b2 = tf.Variable(self.initializer([self.output_size]))
+
+            self.rnn_cell = tf.contrib.rnn.BasicLSTMCell(self.hidden_units)
             
             logits = self.feed_forward(self.x)
 
+            self.num_paras = [self.hidden_units*self.fully_connected_units+self.fully_connected_units,self.fully_connected_units*self.output_size+self.output_size,4*(self.hidden_units+self.hidden_units*(self.hidden_units+self.features_per_step))]
         return logits
 
 
@@ -170,8 +174,8 @@ class NN_MNIST(object):
             self.f_block_cache[v] /= fisher_size
         self.f_cache /= fisher_size
         
-        self.f_diag = None
-        self.f_block = None
+        self.f_diag = []
+        self.f_block = []
         self.f = None
         return
 
@@ -189,20 +193,19 @@ class NN_MNIST(object):
             #sess.run(tf.variables_initializer([tmp3]),feed_dict={self.x:fisher_x,self.y_:fisher_y})
 
         tmp_list = tmp+tmp2+tmp3
-        #sess.run((tf.variables_initializer(tmp),tf.variables_initializer(tmp2)),feed_dict={self.x:fisher_x,self.y_:fisher_y})  
         
         # initialize these values fisher data
         sess.run(tf.variables_initializer(tmp_list),feed_dict={self.x:fisher_x,self.y_:fisher_y})  
 
         # add fisher of current task to previous fisher
-        if self.f_diag is not None:
+        if self.f_diag:
             for v in range(len(tmp)):
                 self.f_diag[v]+=tmp[v]
         else:
             for v in range(len(tmp)):
                 self.f_diag.append(tmp[v])
 
-        if self.f_block is not None:
+        if self.f_block:
             for v in range(len(tmp2)):
                 self.f_block[v] += tmp2[v]  
         else:
@@ -232,13 +235,13 @@ class NN_MNIST(object):
                     self.penalty += tf.reduce_sum(tf.multiply(self.f_diag[v],tf.square(tf.subtract(self.vars[v],self.star_vars[v]))))
                 if loss_option==2:
                     difference = tf.reshape(tf.subtract(self.vars[v],self.star_vars[v]),(-1,1))
-                    self.penalty2 += tf.reduce_sum(tf.matmul(tf.transpose(difference),tf.matmul(self.f_block[v],difference)))
+                    self.penalty += tf.reduce_sum(tf.matmul(tf.transpose(difference),tf.matmul(self.f_block[v],difference)))
                 if loss_option==3:
-                    tmp_vars.append(tf.reshape(self.vars[v],(-1,1)))
+                    tmp_vars.append(tf.reshape(tf.subtract(self.star_vars[v],self.vars[v]),(-1,1)))
             if loss_option==3:
-                vars_vec = tf.concat(tmp_vars,0)
-                difference2 = tf.reshape(self.star_vars_vec - vars_vec,(-1,1))
-                self.penalty = tf.reduce_sum(tf.matmul(tf.transpose(difference2),tf.matmul(self.f,difference2)))
+                difference  = tf.reshape(tf.concat(tmp_vars,0),(-1,1))
+                #difference = tf.reshape(self.star_vars_vec - vars_vec,(-1,1))
+                self.penalty = tf.reduce_sum(tf.matmul(tf.transpose(difference),tf.matmul(self.f,difference)))
 
         # total loss
         self.ewc_loss = self.cross_entropy +  (self.fisher_multiplier / 2) * self.penalty
@@ -252,7 +255,6 @@ class NN_MNIST(object):
 
     def train(self,sess,batch_x,batch_y):
         sess.run(self.train_step,feed_dict={self.x:batch_x,self.y_:batch_y})        
-        #print(sess.run((self.ewc_loss,self.cross_entropy),feed_dict={self.x:batch_x,self.y_:batch_y}))
         return 
 
     def test(self,sess,test_x,test_y):
@@ -266,3 +268,6 @@ class NN_MNIST(object):
 
     def get_fisher(self):
         return self.f.eval()
+
+    def get_fisher_d(self):
+        return self.f_diag[3].eval()

@@ -1,5 +1,5 @@
 .DS_Store
-result
-cache
-__pycache__
-MNIST_data
+MNIST_data/
+__pycache__/
+cache/
+result/
