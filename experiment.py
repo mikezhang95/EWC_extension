@@ -22,7 +22,7 @@ def plot_learning_curves(result):
 
     plt.title("Test_Accuracy on %d tasks"%num_tasks)
     plt.savefig("./cache/test_accuracy")
-    # plt.show()
+    #plt.show()
     plt.close()
     return
 
@@ -48,7 +48,7 @@ def plot_what(result,name,iters,save=False):
 	
 def draw_fisher(f,task_id,iters,save=True):
     absf = abs(f)
-    plt.imshow(absf,vmin=np.amin(absf),vmax = np.amax(absf)/1.,cmap="gray_r")
+    plt.imshow(absf,vmin=np.amin(absf),vmax = np.amax(absf)/2.,cmap="gray_r")
 
     print(iters)
     num_paras = f.shape[0]
@@ -66,7 +66,7 @@ def draw_fisher(f,task_id,iters,save=True):
     plt.close()
     return
 
-def experiment(model,train_data,test_data,num_tasks,iterations,batch_size,log_period_updates,fisher_size,loss_option=0,fisher_true=False,fisher_block=False,fisher_diagonal=False,verbose=True):
+def experiment(fisher_multiplier,learning_rate,model,train_data,test_data,num_tasks,iterations,batch_size,log_period_updates,fisher_size,loss_option=0,fisher_true=False,fisher_block=False,fisher_diagonal=False,verbose=True):
 
     if verbose:
         bias1= []
@@ -90,20 +90,21 @@ def experiment(model,train_data,test_data,num_tasks,iterations,batch_size,log_pe
 	
     for t_tr in range(num_tasks):
 	
+        model.update_ewc_loss(fisher_multiplier,learning_rate,loss_option=loss_option)
+
         print("--->>> Training on task %d"%t_tr)
 	
         foo.write("--->>> Training on task %d\n"%t_tr)
         # basic set up at the beginning of the task
         iter = 0
         epoch = 0
-        model.update_ewc_loss(loss_option=loss_option)
 	
         while iter < iterations:
 
             iter += 1
             # train batch
             batch_x,batch_y = train_data.get_batch(t_tr,batch_size)
-            model.train(sess,batch_x,batch_y) 
+            model.train(sess,batch_x,batch_y,t_tr) 
 
             # evaluate every 20 iters
             if iter%log_period_updates == 0:
@@ -116,7 +117,7 @@ def experiment(model,train_data,test_data,num_tasks,iterations,batch_size,log_pe
       		
                 for t_te in range(t_tr+1):
                     # Compute test accuracy	
-                    test_x,test_y = test_data.get_batch(t_te)
+                    test_x,test_y = test_data.get_batch(t_te,10000)
                     test_accuracy = model.test(sess,test_x,test_y)
                     # Display the results
                     if t_te == t_tr:
@@ -135,13 +136,14 @@ def experiment(model,train_data,test_data,num_tasks,iterations,batch_size,log_pe
 
         iters.append(iter/log_period_updates)
         # compute fisher matrix
-        print(" ")
-        print("Computing fisher of task {}".format(t_tr))
-        fisher_x,fisher_y = train_data.get_batch(t_tr,fisher_size)
-        model.compute_fisher(sess,fisher_x,fisher_y,fisher_diagonal=fisher_diagonal,fisher_block=fisher_block,fisher_true=fisher_true)
-        if fisher_true:
-            fim = model.get_fisher()
-            draw_fisher(fim,t_tr,model.num_paras)
+        if t_tr<num_tasks-1:
+            print("\n")
+            print("Computing fisher of task {}\n".format(t_tr))
+            fisher_x,fisher_y = train_data.get_batch(t_tr,fisher_size)
+            model.compute_fisher(sess,fisher_x,fisher_y,fisher_diagonal=fisher_diagonal,fisher_block=fisher_block,fisher_true=fisher_true)
+            if fisher_true:
+                fim = model.get_fisher()
+                draw_fisher(fim,t_tr,model.num_paras)
 
 
         # save the parameters of last task
@@ -151,7 +153,6 @@ def experiment(model,train_data,test_data,num_tasks,iterations,batch_size,log_pe
         plot_what(np.stack(bias1),"bias1",iters,save=True)
         plot_what(np.stack(bias2),"bias2",iters,save=True)
         # plot_what(np.stack(grads),"graditude of bias2",save=True)
-    print("Saving the file")
     plot_learning_curves(test_result)
     foo.close()
-    return 
+    return test_result

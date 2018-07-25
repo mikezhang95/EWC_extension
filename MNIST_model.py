@@ -24,7 +24,7 @@ def lazy_property(function):
 
 # definition
 class NN_MNIST(object):
-    def __init__(self,name,learning_rate,fisher_multiplier,input_size,output_size,hidden_units=32,fully_connected_units=64,time_step=28,features_per_step=28):
+    def __init__(self,name,input_size,output_size,hidden_units=32,fully_connected_units=64,time_step=28,features_per_step=28):
         # initializer
         self.initializer = tf.contrib.layers.xavier_initializer()
         # data
@@ -39,8 +39,6 @@ class NN_MNIST(object):
         self.fully_connected_units = fully_connected_units
         self.time_step = time_step
         self.features_per_step = features_per_step
-        self.learning_rate = learning_rate
-        self.fisher_multiplier = fisher_multiplier
 
         # model outputs
         self.logits
@@ -222,7 +220,7 @@ class NN_MNIST(object):
         return
 
     # calculate EWC loss: entropy and EWC penalty
-    def update_ewc_loss(self,loss_option=0):
+    def update_ewc_loss(self,fisher_multiplier,learning_rate,loss_option=0):
         # loss_option:
         # 0: without EWC penalty 1: with diagonal penalty 2: with block penalty 3: with full penalty
         self.penalty = tf.reduce_sum(tf.zeros([1],tf.float32))
@@ -244,17 +242,24 @@ class NN_MNIST(object):
                 self.penalty = tf.reduce_sum(tf.matmul(tf.transpose(difference),tf.matmul(self.f,difference)))
 
         # total loss
-        self.ewc_loss = self.cross_entropy +  (self.fisher_multiplier / 2) * self.penalty
+        self.ewc_loss = self.cross_entropy +  (fisher_multiplier / 2) * self.penalty
         # train the model
-        optimizer = tf.train.GradientDescentOptimizer(self.learning_rate)
-        self.gvs = optimizer.compute_gradients(self.ewc_loss)
-        # clip the gradients in [-1,1]
-        capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in self.gvs]
-        self.train_step = optimizer.apply_gradients(capped_gvs)
+        for l in range(3):
+            st = "optimizer_" + str(l)
+            with tf.variable_scope(st) as scope:
+                # optimizer = tf.train.AdamOptimizer(learning_rate)
+                optimizer = tf.train.GradientDescentOptimizer(learning_rate)
+                self.gvs = optimizer.compute_gradients(self.ewc_loss)
+                # clip the gradients in [-1,1]
+                capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in self.gvs]
+                self.train_step = optimizer.apply_gradients(capped_gvs)
         return
 
-    def train(self,sess,batch_x,batch_y):
-        sess.run(self.train_step,feed_dict={self.x:batch_x,self.y_:batch_y})        
+    def train(self,sess,batch_x,batch_y,tr):
+
+        st = "optimizer_" + str(tr)
+        with tf.variable_scope(st) as scope:
+            sess.run(self.train_step,feed_dict={self.x:batch_x,self.y_:batch_y})        
         return 
 
     def test(self,sess,test_x,test_y):
