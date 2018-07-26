@@ -5,20 +5,20 @@ import matplotlib.pyplot as plt
 
 
 # evaluation functions
-def plot_learning_curves(result):
+def plot_learning_curves(result,lp):
 	# input： list of test performance on different tasks
     num_tasks = len(result)
     iters = len(result[0])
     for t in range(num_tasks):
         n = len(result[t])
-        x = [iters-n+i for i in range(n)]
+        x = [(iters-n+i)*lp for i in range(n)]
         y = result[t]
         plt.plot(x,y)
         plt.ylim(0,1)
 
     for t in range(1,num_tasks):
         n = len(result[t])
-        plt.vlines(iters-n,0,1,colors = "c", linestyles = "dashed")
+        plt.vlines((iters-n)*lp,0,1,colors = "c", linestyles = "dashed")
 
     plt.title("Test_Accuracy on %d tasks"%num_tasks)
     plt.savefig("./cache/test_accuracy")
@@ -27,18 +27,20 @@ def plot_learning_curves(result):
     return
 
 # evaluation functions
-def plot_what(result,name,iters,save=False):
+def plot_what(result,name,iters,log_period=1,save=False):
     # input：
     plt.title(name)
+    x = np.arange(1,result.shape[0]+1)*log_period
     for r in range(result.shape[1]):
-        plt.plot(result[:,r])
+        plt.plot(x,result[:,r])
       
     max_value = np.amax(result)  
     plt.ylim(-max_value,max_value)
 
-    print(iters)
+    ite = 0
     for t in range(len(iters)-1):
-        plt.vlines(iters[t],-max_value,max_value,colors = "c", linestyles = "dashed")
+        ite += iters[t]
+        plt.vlines(ite,-max_value,max_value,colors = "c", linestyles = "dashed")
 
     if save:
         plt.savefig("./cache/"+name)
@@ -89,9 +91,11 @@ def experiment(fisher_multiplier,learning_rate,model,train_data,test_data,num_ta
     
 	
     for t_tr in range(num_tasks):
-	
-        model.update_ewc_loss(fisher_multiplier,learning_rate,loss_option=loss_option)
-
+        if t_tr>0 and loss_option>0:
+            new_lr = learning_rate*10/fisher_multiplier
+            model.update_ewc_loss(t_tr,fisher_multiplier,new_lr,loss_option=loss_option)
+        else:
+            model.update_ewc_loss(t_tr,fisher_multiplier,learning_rate,loss_option=loss_option)
         print("--->>> Training on task %d"%t_tr)
 	
         foo.write("--->>> Training on task %d\n"%t_tr)
@@ -134,7 +138,7 @@ def experiment(fisher_multiplier,learning_rate,model,train_data,test_data,num_ta
                     bias2.append(bias[1])
                     grads.append(model.get_grads(sess,batch_x,batch_y))
 
-        iters.append(iter/log_period_updates)
+        iters.append(iter)
         # compute fisher matrix
         if t_tr<num_tasks-1:
             print("\n")
@@ -150,9 +154,9 @@ def experiment(fisher_multiplier,learning_rate,model,train_data,test_data,num_ta
         model.star()
     
     if verbose:
-        plot_what(np.stack(bias1),"bias1",iters,save=True)
-        plot_what(np.stack(bias2),"bias2",iters,save=True)
+        plot_what(np.stack(bias1),"bias1",iters,log_period=log_period_updates,save=True)
+        plot_what(np.stack(bias2),"bias2",iters,log_period=log_period_updates,save=True)
         # plot_what(np.stack(grads),"graditude of bias2",save=True)
-    plot_learning_curves(test_result)
+    plot_learning_curves(test_result,log_period_updates)
     foo.close()
     return test_result

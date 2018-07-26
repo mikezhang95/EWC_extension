@@ -60,13 +60,16 @@ class NN_MNIST(object):
   
         if self.name == "CNN":
             # linear layer + softmax & loss
-            self.w1 = tf.Variable(self.initializer([self.input_size,self.fully_connected_units]))
+            self.w0 = tf.Variable(self.initializer([self.input_size,self.hidden_units]))
+            self.b0 = tf.Variable(self.initializer([self.hidden_units]))
+            self.w1 = tf.Variable(self.initializer([self.hidden_units,self.fully_connected_units]))
             self.b1 = tf.Variable(self.initializer([self.fully_connected_units]))
             self.w2 = tf.Variable(self.initializer([self.fully_connected_units,self.output_size]))
             self.b2 = tf.Variable(self.initializer([self.output_size]))
             logits = self.feed_forward(self.x)
 
-            self.num_paras = [self.input_size*self.fully_connected_units+self.fully_connected_units,self.fully_connected_units*self.output_size+self.output_size]
+            self.num_paras = [self.input_size*self.hidden_units+self.hidden_units,self.hidden_units*self.fully_connected_units+self.fully_connected_units,self.fully_connected_units*self.output_size+self.output_size]
+            self.train_variables_list = [self.w0,self.b0,self.w1,self.b1]
 
         else:
 			# create LSTM/GRU with n_hidden units.
@@ -81,6 +84,8 @@ class NN_MNIST(object):
             logits = self.feed_forward(self.x)
 
             self.num_paras = [self.hidden_units*self.fully_connected_units+self.fully_connected_units,self.fully_connected_units*self.output_size+self.output_size,4*(self.hidden_units+self.hidden_units*(self.hidden_units+self.features_per_step))]
+
+            self.train_variables_list = [self.w1,self.b1,self.rnn_cell]
         return logits
 
 
@@ -106,7 +111,8 @@ class NN_MNIST(object):
     # ease notation for forward calculation
     def feed_forward(self,xx):
         if self.name == "CNN":
-            h1 = tf.nn.relu(tf.matmul(xx,self.w1)+self.b1)
+            h0 = tf.nn.relu(tf.matmul(xx,self.w0)+self.b0)
+            h1 = tf.nn.relu(tf.matmul(h0,self.w1)+self.b1)
             logits = tf.matmul(h1,self.w2)+self.b2
         else:
             inputs = tf.reshape(xx, [-1,self.time_step,self.features_per_step])
@@ -220,7 +226,7 @@ class NN_MNIST(object):
         return
 
     # calculate EWC loss: entropy and EWC penalty
-    def update_ewc_loss(self,fisher_multiplier,learning_rate,loss_option=0):
+    def update_ewc_loss(self,t_tr,fisher_multiplier,learning_rate,loss_option=0):
         # loss_option:
         # 0: without EWC penalty 1: with diagonal penalty 2: with block penalty 3: with full penalty
         self.penalty = tf.reduce_sum(tf.zeros([1],tf.float32))
@@ -243,23 +249,24 @@ class NN_MNIST(object):
 
         # total loss
         self.ewc_loss = self.cross_entropy +  (fisher_multiplier / 2) * self.penalty
+
         # train the model
-        for l in range(3):
-            st = "optimizer_" + str(l)
-            with tf.variable_scope(st) as scope:
-                # optimizer = tf.train.AdamOptimizer(learning_rate)
-                optimizer = tf.train.GradientDescentOptimizer(learning_rate)
-                self.gvs = optimizer.compute_gradients(self.ewc_loss)
-                # clip the gradients in [-1,1]
-                capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in self.gvs]
-                self.train_step = optimizer.apply_gradients(capped_gvs)
-        return
+        # optimizer = tf.train.AdamOptimizer(learning_rate)
+        optimizer = tf.train.GradientDescentOptimizer(learning_rate)
+        # freeze top layer
+        if t_tr==0:
+            self.gvs = optimizer.compute_gradients(self.ewc_loss)
+        else:
+            self.gvs = optimizer.compute_gradients(self.ewc_loss,var_list = self.train_variables_list)
 
-    def train(self,sess,batch_x,batch_y,tr):
+        # clip the gradients in [-1,1]
+        capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in self.gvs]
+        self.train_step = optimizer.apply_gradients(capped_gvs)
 
-        st = "optimizer_" + str(tr)
-        with tf.variable_scope(st) as scope:
-            sess.run(self.train_step,feed_dict={self.x:batch_x,self.y_:batch_y})        
+        return 
+        
+    def train(self,sess,batch_x,batch_y,tr): 
+        sess.run(self.train_step,feed_dict={self.x:batch_x,self.y_:batch_y})
         return 
 
     def test(self,sess,test_x,test_y):

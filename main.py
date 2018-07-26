@@ -10,14 +10,14 @@ os.environ['TF_CPP_MIN_LOG_LEVEL']='1'
 num_tasks = 3
 # Parameters
 batch_size = 256
-iterations = 6*55000/batch_size
+iterations = 12*55000/batch_size
 log_period_updates = 20
 # num of samples to calculate fisher information matrix
-fisher_size = 400
-loss_option=1
-fisher_true=False
-fisher_block=False
-fisher_diagonal=True
+fisher_size = 1
+loss_option = 0
+fisher_true = False
+fisher_block = False
+fisher_diagonal = False
 
 # experiment 1: CNN on permuted MNIST
 learning_rate = 0.1
@@ -25,7 +25,7 @@ fisher_multiplier = 20 # 1000 2000 4000
 sampler = 1
 input_size = 784
 output_size = 10
-hidden_units = 64
+hidden_units = 16
 fully_connected_units = 64
 data = data.generate_permuted_MNIST(num_tasks,sampler)
 model_name = "CNN"
