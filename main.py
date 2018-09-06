@@ -8,25 +8,30 @@ tf.reset_default_graph()
 os.environ['TF_CPP_MIN_LOG_LEVEL']='1'
 # number of tasks 
 num_tasks = 3
-# Parameters
+# Training parameters
 batch_size = 256
 iterations = 12*55000/batch_size
+# period to print the result
 log_period_updates = 20
 # num of samples to calculate fisher information matrix
-fisher_size = 1
-loss_option = 0
+fisher_size = 400
+# loss function for EWC penalty
+loss_option = 1
+# whether to calculate fisher matrix
 fisher_true = False
+# whether to calculate fisher matrix block
 fisher_block = False
-fisher_diagonal = False
+# whether to calculate fisher matrix diagonal
+fisher_diagonal = True
 
 # experiment 1: CNN on permuted MNIST
 learning_rate = 0.1
-fisher_multiplier = 20 # 1000 2000 4000
-sampler = 1
-input_size = 784
+fisher_multiplier = 10 # 1000 2000 4000
+sampler = 4
+input_size = 49
 output_size = 10
-hidden_units = 16
-fully_connected_units = 64
+hidden_units = 32
+fully_connected_units = 16
 data = data.generate_permuted_MNIST(num_tasks,sampler)
 model_name = "CNN"
 model = NN_MNIST(model_name,input_size,output_size,hidden_units,fully_connected_units)

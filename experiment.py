@@ -1,4 +1,5 @@
 import numpy as np
+import scipy
 import time
 import tensorflow as tf
 import matplotlib.pyplot as plt
@@ -27,32 +28,53 @@ def plot_learning_curves(result,lp):
     return
 
 # evaluation functions
-def plot_what(result,name,iters,log_period=1,save=False):
+def plot_what(result,name,iters=None,log_period=1,save=False):
     # input：
     plt.title(name)
     x = np.arange(1,result.shape[0]+1)*log_period
     for r in range(result.shape[1]):
         plt.plot(x,result[:,r])
       
-    max_value = np.amax(result)  
+    max_value = np.amax(result)*1.25 
     plt.ylim(-max_value,max_value)
 
-    ite = 0
-    for t in range(len(iters)-1):
-        ite += iters[t]
-        plt.vlines(ite,-max_value,max_value,colors = "c", linestyles = "dashed")
+    # draw vlines to depart tasks
+    if iters is not None:
+        ite = 0
+        for t in range(len(iters)-1):
+            ite += iters[t]
+            plt.vlines(ite,-max_value,max_value,colors = "c", linestyles = "dashed")
 
     if save:
         plt.savefig("./cache/"+name)
     # plt.show()
     plt.close()
     return
-	
+
+def compute_overlap(f_list,iters,save=True):
+    task = len(f_list)
+    overlap = []
+    for i in range(1,2):
+        ite = 0
+        for it in iters:
+            f1 = f_list[i-1][ite:ite+it,ite:ite+it]
+            f2 = f_list[i][ite:ite+it,ite:ite+it]
+            ite += it
+            f1_h = f1/np.sum(np.diag(f1))
+            f2_h = f2/np.sum(np.diag(f2))
+            overlap.append(abs(np.sum(np.diag(f1_h+f2_h-2*scipy.linalg.sqrtm(f1_h*f2_h)))))
+
+        plt.ylim(0,1)
+        plt.plot(overlap) 
+        if save:
+            plt.savefig("./cache/overlap")
+        plt.close()
+        return
+
 def draw_fisher(f,task_id,iters,save=True):
     absf = abs(f)
     plt.imshow(absf,vmin=np.amin(absf),vmax = np.amax(absf)/2.,cmap="gray_r")
 
-    print(iters)
     num_paras = f.shape[0]
     for t in range(len(iters)-1):
         plt.vlines(iters[t],0,num_paras,colors = "c", linestyles = "dashed")
@@ -65,6 +87,15 @@ def draw_fisher(f,task_id,iters,save=True):
     if save:
         plt.savefig("./cache/" + name)
  #   plt.show()
+    plt.close()
+
+    array = np.reshape(absf,[1,-1])
+    b = array.argsort()
+    rank_f = np.reshape(b.argsort(),[absf.shape[0],absf.shape[1]])
+    plt.imshow(rank_f,cmap="gray_r")
+    if save:
+        name = "FIM_rank_task_"+str(task_id)
+        plt.savefig("./cache/"+name)
     plt.close()
     return
 
@@ -85,6 +116,9 @@ def experiment(fisher_multiplier,learning_rate,model,train_data,test_data,num_ta
     # save the test accuracy for tasks
     test_result = []
     iters = []
+    penalty = []
+    diag_prop = []
+    fisher_matrix = []
     for t in range(num_tasks):
         test_task =[]
         test_result.append(test_task)
@@ -136,27 +170,45 @@ def experiment(fisher_multiplier,learning_rate,model,train_data,test_data,num_ta
                     bias = model.get_bias()
                     bias1.append(bias[0])
                     bias2.append(bias[1])
-                    grads.append(model.get_grads(sess,batch_x,batch_y))
+                    tmp = model.get_penalty(sess,batch_x,batch_y)
+                    penalty.append(np.array([tmp[0],tmp[1]]))
 
         iters.append(iter)
         # compute fisher matrix
-        if t_tr<num_tasks-1:
+        # if t_tr<num_tasks-1:
+        if t_tr>=0:
             print("\n")
             print("Computing fisher of task {}\n".format(t_tr))
             fisher_x,fisher_y = train_data.get_batch(t_tr,fisher_size)
             model.compute_fisher(sess,fisher_x,fisher_y,fisher_diagonal=fisher_diagonal,fisher_block=fisher_block,fisher_true=fisher_true)
+            
             if fisher_true:
                 fim = model.get_fisher()
                 draw_fisher(fim,t_tr,model.num_paras)
-
+                prop = np.sum(np.diag(abs(fim)))/np.sum(abs(fim))
+                foo.write("Fisher Diagonal Proportion: %f\n"%(prop))
+                diag_prop.append(np.array([prop]))
+                if t_tr==0:
+                    fisher_matrix.append(fim)
+                else:
+                    for l in range(t_tr):
+                        fim -= fisher_matrix[l]
+                    fisher_matrix.append(fim)    
 
         # save the parameters of last task
         model.star()
     
     if verbose:
-        plot_what(np.stack(bias1),"bias1",iters,log_period=log_period_updates,save=True)
-        plot_what(np.stack(bias2),"bias2",iters,log_period=log_period_updates,save=True)
-        # plot_what(np.stack(grads),"graditude of bias2",save=True)
+        plot_what(np.stack(bias1),"bias1",iters=iters,log_period=log_period_updates,save=True)
+        plot_what(np.stack(bias2),"bias2",iters=iters,log_period=log_period_updates,save=True)
+
+        if fisher_true:
+            # plot_what(np.stack(diag_prop),"diagonal elements proportion",save=True)
+            plot_what(np.stack(penalty),"penalty",iters=iters,log_period=log_period_updates,save=True)
+
+            compute_overlap(fisher_matrix,model.num_paras)
+
     plot_learning_curves(test_result,log_period_updates)
     foo.close()
+    print("\n")
     return test_result

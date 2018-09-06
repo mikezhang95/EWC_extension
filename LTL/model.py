@@ -1,11 +1,9 @@
-# class for CNN/RNN model on MNIST dataset
-import tensorflow as tf
-import numpy as np
-import functools
-# dropout???
-# early stopping???
-
-# input
+# class for CNN/RNN model on MNIST dataset 
+import tensorflow as tf 
+import numpy as np 
+import functools 
+# dropout???  # early stopping???  
+# input 
 def get_placeholders(input_size,output_size):
     x= tf.placeholder(tf.float32, [None, input_size])
     y_ = tf.placeholder(tf.float32, [None, output_size])
@@ -23,34 +21,26 @@ def lazy_property(function):
     return decorator
 
 # definition
-class NN_MNIST(object):
-    def __init__(self,name,input_size,output_size,hidden_units=32,fully_connected_units=64,time_step=28,features_per_step=28):
+class NN(object):
+    def __init__(self,input_size,output_size,hidden_units=32,fully_connected_units=64):
         # initializer
         self.initializer = tf.contrib.layers.xavier_initializer()
         # data
         self.x,self.y_ = get_placeholders(input_size,output_size)
-        # model type: RNN or CNN
-        self.name = name
         
         # model structure
         self.input_size = input_size
         self.output_size = output_size
         self.hidden_units = hidden_units
-        self.fully_connected_units = fully_connected_units
-        self.time_step = time_step
-        self.features_per_step = features_per_step
 
         # model outputs
         self.logits
-        self.predictions
-        self.cross_entropy
-        self.accuracy
+        self.loss
 
-        # save variables from current task in vars
         # save variables from past task in star_vars 
-        self.vars = []
-        for variable in tf.trainable_variables():
-            self.vars.append(variable)
+        self.vars = [self.w0,self.b0]
+        #for variable in tf.trainable_variables():
+           # self.vars.append(variable)
         self.star_vars = []
         self.star_vars_vec = []
         return
@@ -58,70 +48,32 @@ class NN_MNIST(object):
     @lazy_property
     def logits(self):
   
-        if self.name == "CNN":
-            # linear layer + softmax & loss
-            self.w0 = tf.Variable(self.initializer([self.input_size,self.hidden_units]))
-            self.b0 = tf.Variable(self.initializer([self.hidden_units]))
-            self.w1 = tf.Variable(self.initializer([self.hidden_units,self.fully_connected_units]))
-            self.b1 = tf.Variable(self.initializer([self.fully_connected_units]))
-            self.w2 = tf.Variable(self.initializer([self.fully_connected_units,self.output_size]))
-            self.b2 = tf.Variable(self.initializer([self.output_size]))
-            logits = self.feed_forward(self.x)
+        # linear layer + l2 loss
+        self.w0 = tf.Variable(self.initializer([self.input_size,self.hidden_units]))
+        self.b0 = tf.Variable(self.initializer([self.hidden_units]))
+        self.w1 = tf.Variable(self.initializer([self.hidden_units,self.output_size]))
+        self.b1 = tf.Variable(self.initializer([self.output_size]))
+        logits = self.feed_forward(self.x)
+        
+        self.train_variables_list = [self.w1,self.b1]
 
-            self.num_paras = [self.input_size*self.hidden_units+self.hidden_units,self.hidden_units*self.fully_connected_units+self.fully_connected_units,self.fully_connected_units*self.output_size+self.output_size]
-            self.train_variables_list = [self.w0,self.b0,self.w1,self.b1]
+        self.num_paras = [self.input_size*self.hidden_units+self.hidden_units,self.hidden_units*self.output_size+self.output_size]
 
-        else:
-			# create LSTM/GRU with n_hidden units.
 
-            self.w1 = tf.Variable(self.initializer([self.hidden_units,self.fully_connected_units]))
-            self.b1 = tf.Variable(self.initializer([self.fully_connected_units]))
-            self.w2 = tf.Variable(self.initializer([self.fully_connected_units,self.output_size]))
-            self.b2 = tf.Variable(self.initializer([self.output_size]))
-
-            self.rnn_cell = tf.contrib.rnn.BasicLSTMCell(self.hidden_units)
-            
-            logits = self.feed_forward(self.x)
-
-            self.num_paras = [self.hidden_units*self.fully_connected_units+self.fully_connected_units,self.fully_connected_units*self.output_size+self.output_size,4*(self.hidden_units+self.hidden_units*(self.hidden_units+self.features_per_step))]
-
-            self.train_variables_list = [self.w1,self.b1,self.rnn_cell]
         return logits
 
 
     @lazy_property
-    def predictions(self):
-        return tf.nn.softmax(self.logits)
-
-    @lazy_property
-    def cross_entropy(self):
+    def loss(self):
 		# loss function on task T
-        return tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.y_,logits=self.logits))
+        return tf.reduce_mean(tf.losses.mean_squared_error(labels=self.y_,predictions=self.logits))
 
-    @lazy_property
-    def accuracy(self):
-		# evalutaion
-        correct_prediction = tf.equal(tf.argmax(self.y_,1),tf.argmax(self.predictions,1))
-        return tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-
-    def calculate_entropy(self,probs):
-        entropy = tf.multiply(-probs,tf.log(probs))
-        return tf.reduce_mean(tf.reduce_sum(entropy,1))
 
     # ease notation for forward calculation
     def feed_forward(self,xx):
-        if self.name == "CNN":
-            h0 = tf.nn.relu(tf.matmul(xx,self.w0)+self.b0)
-            h1 = tf.nn.relu(tf.matmul(h0,self.w1)+self.b1)
-            logits = tf.matmul(h1,self.w2)+self.b2
-        else:
-            inputs = tf.reshape(xx, [-1,self.time_step,self.features_per_step])
-            # rnn outputs
-            outputs, state = tf.nn.dynamic_rnn(self.rnn_cell,inputs,dtype=tf.float32)
-            output = tf.reshape(outputs[:,-1,:],(-1,self.hidden_units))
-            h0 = tf.nn.relu(output)
-            h1 = tf.nn.relu(tf.matmul(h0,self.w1)+self.b1)
-            logits = tf.matmul(h1,self.w2)+self.b2
+        # h0 = tf.nn.relu(tf.matmul(xx,self.w0)+self.b0)
+        h0 = tf.matmul(xx,self.w0)+self.b0  # 没加relu
+        logits = tf.matmul(h0,self.w1)+self.b1
         return logits
 
     # save the optimal weights after most recent task training
@@ -136,7 +88,7 @@ class NN_MNIST(object):
         return
         
 
-    def set_up_fisher(self,fisher_size,empirical=False):
+    def set_up_fisher(self,fisher_size,empirical=True):
         # iterate the fisher samples
         for i in range(fisher_size):
             xx = tf.reshape(self.x[i:i+1,:], [-1, self.input_size])
@@ -149,7 +101,7 @@ class NN_MNIST(object):
                 cla = tf.reshape(tf.stop_gradient(tf.to_int32(tf.multinomial(self.feed_forward(xx), 1))),[-1])
                 yy_ = tf.one_hot(cla,self.output_size)
             # calculate the loss for a single sample
-            loss_per_sample = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=yy_,logits=self.feed_forward(xx)))
+            loss_per_sample =  tf.reduce_mean(tf.losses.mean_squared_error(labels=yy_,predictions=self.feed_forward(xx)))
             # calculate the gradients of this sample
             grads_per_sample = tf.gradients(loss_per_sample,self.vars) 
   
@@ -226,22 +178,23 @@ class NN_MNIST(object):
         return
 
     # calculate EWC loss: entropy and EWC penalty
-    def update_ewc_loss(self,t_tr,fisher_multiplier,learning_rate,loss_option=0):
+    def update_ewc_loss(self,fisher_multiplier,learning_rate,loss_option=0,freeze=False):
         # loss_option:
         # 0: without EWC penalty 1: with diagonal penalty 2: with block penalty 3: with full penalty
         self.penalty = tf.reduce_sum(tf.zeros([1],tf.float32))
-        self.penalty_diag = tf.reduce_sum(tf.zeros([1],tf.float32))
-        # self.penalty3 = tf.reduce_sum(tf.zeros([1],tf.float32))
+
         if self.star_vars:
             tmp_vars =  [] 
             for v in range(len(self.vars)):
-
-                self.penalty_diag += tf.reduce_sum(tf.multiply(self.f_diag[v],tf.square(tf.subtract(self.vars[v],self.star_vars[v]))))
+                # diagonal fisher
                 if loss_option==1:
                     self.penalty += tf.reduce_sum(tf.multiply(self.f_diag[v],tf.square(tf.subtract(self.vars[v],self.star_vars[v]))))
+                # block fisher
                 if loss_option==2:
                     difference = tf.reshape(tf.subtract(self.vars[v],self.star_vars[v]),(-1,1))
                     self.penalty += tf.reduce_sum(tf.matmul(tf.transpose(difference),tf.matmul(self.f_block[v],difference)))
+
+                # full fisher
                 if loss_option==3:
                     tmp_vars.append(tf.reshape(tf.subtract(self.star_vars[v],self.vars[v]),(-1,1)))
             if loss_option==3:
@@ -249,13 +202,13 @@ class NN_MNIST(object):
                 self.penalty = tf.reduce_sum(tf.matmul(tf.transpose(difference),tf.matmul(self.f,difference)))
 
         # total loss
-        self.ewc_loss = self.cross_entropy +  (fisher_multiplier / 2) * self.penalty
+        self.ewc_loss = self.loss +  (fisher_multiplier / 2) * self.penalty
 
         # train the model
         # optimizer = tf.train.AdamOptimizer(learning_rate)
-        optimizer = tf.train.GradientDescentOptimizer(learning_rate)
-        # freeze top layer
-        if t_tr==0:
+        optimizer = tf.train.GradientDescentOptimizer(learning_rate)        
+        
+        if freeze==False:
             self.gvs = optimizer.compute_gradients(self.ewc_loss)
         else:
             self.gvs = optimizer.compute_gradients(self.ewc_loss,var_list = self.train_variables_list)
@@ -263,27 +216,21 @@ class NN_MNIST(object):
         # clip the gradients in [-1,1]
         capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in self.gvs]
         self.train_step = optimizer.apply_gradients(capped_gvs)
-
         return 
         
-    def train(self,sess,batch_x,batch_y,tr): 
+    def train(self,sess,batch_x,batch_y): 
         sess.run(self.train_step,feed_dict={self.x:batch_x,self.y_:batch_y})
         return 
 
-    def test(self,sess,test_x,test_y):
-        return sess.run(self.accuracy,feed_dict={self.x:test_x,self.y_:test_y})
-
-    def get_bias(self):
-        return (self.b1.eval(),self.b2.eval())
-        
-    def get_grads(self,sess,batch_x,batch_y):
-        return sess.run(tf.reshape(self.gvs[3][0],[-1]),feed_dict={self.x:batch_x,self.y_:batch_y})
 
     def get_fisher(self):
         return self.f.eval()
 
-    def get_fisher_d(self):
-        return self.f_diag[3].eval()
+    def test(self,sess,batch_x,batch_y): 
+        loss = sess.run(self.loss,feed_dict={self.x:batch_x,self.y_:batch_y})
+        return loss
 
-    def get_penalty(self,sess,batch_x,batch_y):
-        return sess.run((self.penalty_diag,self.penalty),feed_dict={self.x:batch_x,self.y_:batch_y})
+
+    def get_base(self):
+        return self.w0.eval()
+
